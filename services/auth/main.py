@@ -1,7 +1,6 @@
 import bcrypt
 from db.connection.main import Connection
-import bcrypt
-from schemas.auth.main import UserCreate
+from schemas.auth.main import UserCreate,RoleCreate
 
 class authServices:
     def __init__(self):
@@ -11,8 +10,12 @@ class authServices:
 
     def verify_password(self,password,hashed_password):
         return bcrypt.checkpw(password.encode('utf-8'),hashed_password)
+    def create_role(self,data:RoleCreate):
+        with self.db.conn.cursor() as cursor:
+            cursor.execute("INSERT INTO Role (nombre,description) values (%s , %s)",(data.name,data.description))
+            self.db.conn.commit()
 
-    def create_user(self,data:UserCreate):
+    def create_student(self,data:UserCreate):
         hashed_password = self.hash_password(data.password).decode("utf-8")
         with self.db.conn.cursor() as cursor:
             #Verificar si el correo ya existe
@@ -28,5 +31,8 @@ class authServices:
 
             if exist_user:
                 raise ValueError("Ya hay un estudiante con ese codigo")
+            
+            #Crear usuario 
+            cursor.execute("INSERT INTO users () ")
 
         
