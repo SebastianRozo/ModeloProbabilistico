@@ -14,8 +14,8 @@ class RegisterStudent(BaseModel):
     student_code: str = Field(min_length=3, max_length=30)
     birth_date: date
     gender: str = Field(min_length=1, max_length=30)
-    faculty: str = Field(min_length=2, max_length=100)
-    program: str = Field(min_length=2, max_length=100)
+    faculty: int = Field(ge=1)
+    program: int = Field(ge=1)
     semester: int = Field(ge=1, le=20)
     accepted_informed_consent: Literal[True]
     consent_version: str = Field(min_length=1, max_length=30, default="v1")
@@ -27,3 +27,10 @@ class StudentVerifyCode(BaseModel):
 class StudentLogin(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     password: str = Field(min_length=8, max_length=128)
+
+class FacultyCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+class ProgramCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    faculty_id: int
