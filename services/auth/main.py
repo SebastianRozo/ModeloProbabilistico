@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from db.connection.main import Connection
-from schemas.auth.main import RegisterStudent,RoleCreate,StudentLogin,FacultyCreate,ProgramCreate
+from schemas.auth.main import RegisterStudent,RoleCreate,StudentLogin,FacultyCreate,ProgramCreate,RegisterUser
 from fastapi import HTTPException
 from fastapi import Depends
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
@@ -14,6 +14,7 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
 security = HTTPBearer()
+DEFAULT_USER_ROLE = "usuario"
 
 
 class authServices:
@@ -54,7 +55,20 @@ class authServices:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error obteniendo roles: {str(e)}")
 
-    def get_role_id(self,rol_name:str):
+    def get_role_id(self,rol_id:int):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT id_rol FROM roles WHERE id_rol = %s",(rol_id,))
+                role = cursor.fetchone()
+                if not role:
+                    raise HTTPException(status_code=404, detail=f"No existe el rol '{rol_id}'")
+                return role[0]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo rol: {str(e)}")
+
+    def get_role_id_by_name(self,rol_name:str):
         try:
             with self.db.conn.cursor() as cursor:
                 cursor.execute("SELECT id_rol FROM roles WHERE nombre_rol = %s",(rol_name,))
@@ -83,13 +97,14 @@ class authServices:
                 if exist_user:
                     raise HTTPException(status_code=400, detail="Ya hay un estudiante con ese codigo")
 
-                id_rol = self.get_role_id("estudiante")
+                id_rol = self.get_role_id_by_name("estudiante")
                 cursor.execute("INSERT INTO users (name, last_name, email, password, fk_id_rol) VALUES (%s, %s, %s, %s, %s) RETURNING id_usuario", (data.name, data.last_name, data.email, hashed_password, id_rol))
                 id_usuario = cursor.fetchone()[0]
                 cursor.execute("INSERT INTO students (fk_id_usuario,codigo_institucional,facultad,programa,semestre,fecha_nacimiento,genero) VALUES (%s, %s, %s, %s, %s, %s, %s)", (id_usuario,data.student_code, data.faculty, data.program, data.semester, data.birth_date, data.gender))
                 cursor.execute("INSERT INTO user_consents (fk_id_usuario,tipo_consentimiento,version_consentimiento,aceptado) VALUES (%s, %s, %s, %s)", (id_usuario, "informed_consent", data.consent_version, data.accepted_informed_consent))
                 self.db.conn.commit()
                 return {"message":"Estudiante creado exitosamente"}
+                
         except HTTPException:
             self.db.conn.rollback()
             raise
@@ -99,6 +114,29 @@ class authServices:
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error creando estudiante: {str(e)}")
+    
+    def create_user(self, data:RegisterUser):
+        try:
+            hashed_password = self.hash_password(data.password).decode("utf-8")
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT id_usuario FROM users WHERE email = %s",(data.email,))
+                exist_user= cursor.fetchone()
+                if exist_user:
+                    raise HTTPException(status_code=400, detail="El usuario ya existe")
+                id_rol = self.get_role_id(data.role_id)
+                cursor.execute("INSERT INTO users (name, last_name, email, password, fk_id_rol) VALUES (%s, %s, %s, %s, %s) RETURNING id_usuario", (data.name, data.last_name, data.email, hashed_password, id_rol))
+                cursor.fetchone()
+                self.db.conn.commit()
+                return {"message":"Usuario creado exitosamente"}
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except UniqueViolation:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=400, detail="El usuario ya existe")
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error creando usuario: {str(e)}")
 
     def decode_token(self,token:str):
         try:
@@ -130,17 +168,25 @@ class authServices:
         try:
             self._require_jwt_config()
             with self.db.conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM users WHERE email = %s",(data.email,))
+                cursor.execute(
+                    """
+                    SELECT users.id_usuario, users.email, users.password, roles.nombre_rol
+                    FROM users
+                    JOIN roles ON roles.id_rol = users.fk_id_rol
+                    WHERE users.email = %s
+                    """,
+                    (data.email,),
+                )
                 user = cursor.fetchone()
                 if not user:
                     raise HTTPException(status_code=404, detail="Usuario no encontrado")
-                if not self.verify_password(data.password, user[4].encode("utf-8")):
+                if not self.verify_password(data.password, user[2].encode("utf-8")):
                     raise HTTPException(status_code=400, detail="Contraseña incorrecta")
                 
                 payload ={
                     "sub": str(user[0]),
-                    "email": user[3],
-                    "role": "estudiante",
+                    "email": user[1],
+                    "role": user[3],
                     "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
                 }
                 token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -187,3 +233,19 @@ class authServices:
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error creando programa: {str(e)}")
+
+    def get_all_faculties(self):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM facultades")
+                return cursor.fetchall()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo facultades: {str(e)}")
+    
+    def get_all_programs(self):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM programs")
+                return cursor.fetchall()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo programas: {str(e)}")
