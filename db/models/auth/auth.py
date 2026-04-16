@@ -19,14 +19,14 @@ class User(Base):
     __tablename__ = "users"
 
     id_usuario = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String, nullable=False)
-    apellido = Column(String, nullable=False)
-    correo = Column(String, unique=True, nullable=False)
-    contrasena_hash = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
     estado = Column(String, nullable=False, default="pendiente_verificacion")
-    correo_verificado = Column(Boolean, nullable=False, default=False)
-    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    ultimo_acceso = Column(DateTime(timezone=True), nullable=True)
+    email_verified = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_access = Column(DateTime(timezone=True), nullable=True)
 
     fk_id_rol = Column(Integer, ForeignKey("roles.id_rol"), nullable=False)
 
