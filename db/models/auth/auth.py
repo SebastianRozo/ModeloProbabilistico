@@ -50,13 +50,15 @@ class Student(Base):
     id_estudiante = Column(Integer, primary_key=True, index=True)
     fk_id_usuario = Column(Integer, ForeignKey("users.id_usuario"), unique=True, nullable=False)
     codigo_institucional = Column(String, unique=True, nullable=False)
-    facultad = Column(String, nullable=False)
-    programa = Column(String, nullable=False)
+    facultad = Column(Integer, ForeignKey("facultades.id_facultad"), nullable=False)
+    programa = Column(Integer, ForeignKey("programs.id_programa"), nullable=False)
     semestre = Column(Integer, nullable=False)
     fecha_nacimiento = Column(Date, nullable=False)
     genero = Column(String, nullable=False)
 
     usuario = relationship("User", back_populates="estudiante")
+    facultad = relationship("facultad", back_populates="estudiantes")
+    programa = relationship("program", back_populates="estudiantes")
 
 
 class EmailVerificationCode(Base):
@@ -85,3 +87,13 @@ class UserConsent(Base):
 
     usuario = relationship("User", back_populates="consentimientos")
 
+class program(Base):
+    __tablename__ = "programs"
+    id_programa = Column(Integer, primary_key=True, index=True)
+    nombre_programa = Column(String, nullable=False)
+    fk_id_facultad = Column(Integer, ForeignKey("facultades.id_facultad"), nullable=False)
+    
+class facultad(Base):
+    __tablename__ = "facultades"
+    id_facultad = Column(Integer, primary_key=True, index=True)
+    nombre_facultad = Column(String, nullable=False)
