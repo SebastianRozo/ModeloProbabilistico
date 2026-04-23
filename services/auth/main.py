@@ -236,9 +236,25 @@ class authServices:
     def deleteUser(self,id_usuario:int):
         try:
             with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT id_usuario FROM users WHERE id_usuario = %s", (id_usuario,))
+                user = cursor.fetchone()
+                if not user:
+                    raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+                cursor.execute("SELECT id_estudiante FROM students WHERE fk_id_usuario = %s", (id_usuario,))
+                student = cursor.fetchone()
+                if student:
+                    cursor.execute("DELETE FROM phq9_responses WHERE student_id = %s", (student[0],))
+                    cursor.execute("DELETE FROM students WHERE id_estudiante = %s", (student[0],))
+
+                cursor.execute("DELETE FROM email_verification_codes WHERE fk_id_usuario = %s", (id_usuario,))
+                cursor.execute("DELETE FROM user_consents WHERE fk_id_usuario = %s", (id_usuario,))
                 cursor.execute("DELETE FROM users WHERE id_usuario = %s",(id_usuario,))
                 self.db.conn.commit()
             return {"message":"Usuario eliminado exitosamente"}
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error eliminando usuario: {str(e)}")
@@ -426,3 +442,31 @@ class authServices:
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error reenviando codigo: {str(e)}")
+
+    def get_all_students(self):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM students")
+                students = cursor.fetchall()
+                return students
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo estudiantes: {str(e)}")
+
+    def delete_student(self, id_estudiante: int):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute("SELECT id_estudiante FROM students WHERE id_estudiante = %s", (id_estudiante,))
+                student = cursor.fetchone()
+                if not student:
+                    raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+                cursor.execute("DELETE FROM phq9_responses WHERE student_id = %s", (id_estudiante,))
+                cursor.execute("DELETE FROM students WHERE id_estudiante = %s", (id_estudiante,))
+                self.db.conn.commit()
+            return {"message":"Estudiante eliminado exitosamente"}
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error eliminando estudiante: {str(e)}")
