@@ -1,10 +1,12 @@
 from fastapi import FastAPI, Depends
+from services.auth.main import authServices
+from services.model.main import modelServices
 from schemas.auth.main import (
     RegisterStudent, StudentLogin, RoleCreate,
     FacultyCreate, ProgramCreate, RegisterUser,
     VerifyEmailCode, ResendVerificationCode, UpdateUser, ChangePassword
 )
-from services.auth.main import authServices
+from schemas.phq9 import PHQ9Request
 
 app = FastAPI()
 
@@ -47,6 +49,15 @@ def change_password(data: ChangePassword):
 @app.get("/users", tags=["Users"])
 def get_all_users():
     return authServices().getAllUsers()
+
+@app.get("/students", tags=["Students"])
+def get_all_students():
+    return authServices().get_all_students()
+
+@app.get("/delete-student/{id_estudiante}", tags=["Students"])
+def delete_student(id_estudiante:int):
+    return authServices().delete_student(id_estudiante)
+
 @app.get("/delete-user/{id_usuario}", tags=["Users"])
 def delete_user(id_usuario:int):
     return authServices().deleteUser(id_usuario)
@@ -70,3 +81,8 @@ def get_all_faculties(current_user=Depends(authServices().get_current_user)):
 @app.get("/programs", tags=["Programs"])
 def get_all_programs(current_user=Depends(authServices().get_current_user)):
     return authServices().get_all_programs()
+
+
+@app.post("/predict", tags=["Model"])
+def predict(data: PHQ9Request, current_user=Depends(authServices().get_current_user)):
+    return modelServices().predict_depression(data, current_user)

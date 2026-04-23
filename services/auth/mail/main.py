@@ -3,10 +3,6 @@ import random
 
 import resend
 
-
-RESEND_TEST_FROM_EMAIL = "onboarding@resend.dev"
-
-
 def send_verification_code(email: str) -> str:
     api_key = os.getenv("RESEND_API_KEY") or os.getenv("RESEND_API")
     from_email = os.getenv("RESEND_FROM_EMAIL") or os.getenv("from_email")
@@ -67,15 +63,11 @@ def send_verification_code(email: str) -> str:
         "text": f"Tu código de verificación es: {code}. Este código vence en 10 minutos.",
     }
 
-    sender = from_email or RESEND_TEST_FROM_EMAIL
+    sender = from_email
 
     try:
         resend.Emails.send({**message, "from": sender})
     except Exception as exc:
-        if sender == RESEND_TEST_FROM_EMAIL or "domain is not verified" not in str(exc).lower():
             raise
-
-        # Mientras el dominio termina de verificarse en Resend, usamos el remitente de pruebas.
-        resend.Emails.send({**message, "from": RESEND_TEST_FROM_EMAIL})
 
     return code
