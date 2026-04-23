@@ -29,10 +29,26 @@ class RegisterStudent(BaseModel):
     accepted_informed_consent: Literal[True]
     consent_version: str = Field(min_length=1, max_length=30, default="v1")
 
-class StudentVerifyCode(BaseModel):
+class VerifyEmailCode(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     verification_code: str = Field(min_length=4, max_length=12)
-    
+
+
+class ResendVerificationCode(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+
+
+class UpdateUser(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    last_name: str | None = Field(default=None, min_length=2, max_length=100)
+    email: str | None = Field(default=None, min_length=5, max_length=255)
+    role_id: int | None = Field(default=None, ge=1)
+
+
+class ChangePassword(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+     
 class StudentLogin(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     password: str = Field(min_length=8, max_length=128)
