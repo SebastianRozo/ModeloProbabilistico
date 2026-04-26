@@ -443,12 +443,31 @@ class authServices:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error reenviando codigo: {str(e)}")
 
-    def get_all_students(self):
+    def get_total_pages(self, total:int, limit:int):
+        if total == 0:
+            return 0
+        return (total + limit - 1) // limit
+
+    def get_all_students(self, page:int = 1, limit:int = 10):
         try:
+            offset = (page - 1) * limit
             with self.db.conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM students")
+                cursor.execute("SELECT COUNT(*) FROM students")
+                total = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT * FROM students ORDER BY id_estudiante ASC LIMIT %s OFFSET %s",
+                    (limit, offset),
+                )
                 students = cursor.fetchall()
-                return students
+                return {
+                    "items": students,
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": total,
+                        "total_pages": self.get_total_pages(total, limit),
+                    },
+                }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error obteniendo estudiantes: {str(e)}")
 
