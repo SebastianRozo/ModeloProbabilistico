@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Query, Response
 from services.auth.main import authServices
 from services.model.main import modelServices
 from schemas.auth.main import (
@@ -51,12 +51,51 @@ def get_all_users():
     return authServices().getAllUsers()
 
 @app.get("/students", tags=["Students"])
-def get_all_students():
-    return authServices().get_all_students()
+def get_all_students(
+    page:int = Query(1, ge=1),
+    limit:int = Query(10, ge=1, le=100),
+):
+    return authServices().get_all_students(page, limit)
 
 @app.get("/delete-student/{id_estudiante}", tags=["Students"])
 def delete_student(id_estudiante:int):
     return authServices().delete_student(id_estudiante)
+
+@app.get("/students/{id_estudiante}/evaluations", tags=["Students"])
+def get_student_evaluations(
+    id_estudiante:int,
+    page:int = Query(1, ge=1),
+    limit:int = Query(10, ge=1, le=100),
+):
+    return modelServices().get_student_evaluations(id_estudiante, page, limit)
+
+@app.get("/dashboard/stats", tags=["Dashboard"])
+def get_dashboard_stats(
+    page:int = Query(1, ge=1),
+    limit:int = Query(12, ge=1, le=60),
+):
+    return modelServices().get_dashboard_stats(page, limit)
+
+@app.get("/evaluations", tags=["Reports"])
+def get_evaluations(
+    risk:str | None = Query(None),
+    page:int = Query(1, ge=1),
+    limit:int = Query(10, ge=1, le=100),
+):
+    return modelServices().get_evaluations_report(risk, page, limit)
+
+@app.get("/reports/export", tags=["Reports"])
+def export_report(
+    risk:str | None = Query(None),
+    page:int = Query(1, ge=1),
+    limit:int = Query(100, ge=1, le=1000),
+):
+    pdf_content = modelServices().get_evaluations_report_pdf(risk, page, limit)
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=reporte_evaluaciones.pdf"},
+    )
 
 @app.get("/delete-user/{id_usuario}", tags=["Users"])
 def delete_user(id_usuario:int):
