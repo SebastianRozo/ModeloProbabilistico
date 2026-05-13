@@ -7,6 +7,8 @@ from schemas.auth.main import (
     VerifyEmailCode, ResendVerificationCode, UpdateUser, ChangePassword
 )
 from schemas.phq9 import PHQ9Request
+from schemas.gad7 import GAD7Request
+from schemas.citas import AppointmentCreate, AppointmentUpdate
 
 app = FastAPI()
 
@@ -125,3 +127,20 @@ def get_all_programs(current_user=Depends(authServices().get_current_user)):
 @app.post("/predict", tags=["Model"])
 def predict(data: PHQ9Request, current_user=Depends(authServices().get_current_user)):
     return modelServices().predict_depression(data, current_user)
+
+@app.post("/predict_anxiety", tags=["Model"])
+def predict_anxiety(data: GAD7Request, current_user=Depends(authServices().get_current_user)):
+    return modelServices().predict_anxiety(data, current_user)
+
+@app.post("/appointments", tags=["Appointments"])
+def create_appointment(data: AppointmentCreate, current_user=Depends(authServices().get_current_user)):
+    return modelServices().create_appointment(data, current_user)
+
+@app.get("/appointments/me", tags=["Appointments"])
+def get_my_appointments(current_user=Depends(authServices().get_current_user)):
+    return modelServices().get_my_appointments(current_user)
+
+@app.get("/appointments", tags=["Appointments"])
+def get_all_appointments(current_user=Depends(authServices().get_current_user)):
+    # In a real app, check for admin/psychologist role here
+    return modelServices().get_all_appointments()

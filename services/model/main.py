@@ -1,11 +1,13 @@
 from fastapi import HTTPException
 from db.connection.main import Connection
 from schemas.phq9 import PHQ9Request
+from schemas.gad7 import GAD7Request
+from schemas.citas import AppointmentCreate, AppointmentUpdate
 from datetime import datetime
 from io import BytesIO
 from xml.sax.saxutils import escape
 import numpy as np
-from dataset.loader import getDataset
+from dataset.loader import getDataset, getDataSetGAD7
 from model.logistic_regression import predict_proba, train_model,predict
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -615,3 +617,212 @@ class modelServices:
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error prediciendo depresion: {str(e)}")
+
+    def ensure_gad7_table(self, cursor):
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gad7_responses (
+                id SERIAL PRIMARY KEY,
+                student_id INTEGER NOT NULL REFERENCES students(id_estudiante),
+                q1 INTEGER NOT NULL,
+                q2 INTEGER NOT NULL,
+                q3 INTEGER NOT NULL,
+                q4 INTEGER NOT NULL,
+                q5 INTEGER NOT NULL,
+                q6 INTEGER NOT NULL,
+                q7 INTEGER NOT NULL,
+                total_score INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        self.db.conn.commit()
+
+    def ensure_appointments_table(self, cursor):
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS appointments (
+                id SERIAL PRIMARY KEY,
+                student_id INTEGER NOT NULL REFERENCES students(id_estudiante),
+                psychologist_id INTEGER REFERENCES users(id_usuario),
+                appointment_date TIMESTAMPTZ NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pendiente',
+                reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        self.db.conn.commit()
+
+    def get_gad7_risk(self, score:int):
+        if score <= 4:
+            return "minimo"
+        if score <= 9:
+            return "leve"
+        if score <= 14:
+            return "moderado"
+        return "severo"
+
+    def predict_anxiety(self, data: GAD7Request, current_user):
+        try:
+            train_x, test_x, train_y, test_y = getDataSetGAD7()
+            train_y = train_y.ravel()
+            w = np.zeros(train_x.shape[1])
+            b = 0.0
+            learning_rate = 0.01
+            iteraciones = 1000
+            w, b = train_model(train_x, train_y, w, b, learning_rate, iteraciones)
+
+            respuestas = [
+                data.question1,
+                data.question2,
+                data.question3,
+                data.question4,
+                data.question5,
+                data.question6,
+                data.question7,
+            ]
+            vector_gad7 = np.array([respuestas], dtype=float)
+            probabilidad = float(predict_proba(vector_gad7, w, b)[0])
+            clase = int(predict([probabilidad])[0])
+            total_score = int(sum(respuestas))
+
+            with self.db.conn.cursor() as cursor:
+                self.ensure_gad7_table(cursor)
+                cursor.execute(
+                    "SELECT id_estudiante FROM students WHERE fk_id_usuario = %s",
+                    (current_user[0],)
+                )
+                student = cursor.fetchone()
+                if not student:
+                    raise HTTPException(status_code=404, detail="El usuario autenticado no es un estudiante")
+                
+                student_id = student[0]
+                cursor.execute(
+                    """
+                    INSERT INTO gad7_responses (
+                        student_id, q1, q2, q3, q4, q5, q6, q7, total_score
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (student_id, *respuestas, total_score)
+                )
+                response_id = cursor.fetchone()[0]
+                self.db.conn.commit()
+
+            return {
+                "response_id": response_id,
+                "probabilidad": probabilidad,
+                "clase": clase,
+                "total_score": total_score,
+                "riesgo": self.get_gad7_risk(total_score)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error prediciendo ansiedad: {str(e)}")
+
+    def create_appointment(self, data: AppointmentCreate, current_user):
+        try:
+            with self.db.conn.cursor() as cursor:
+                self.ensure_appointments_table(cursor)
+                cursor.execute(
+                    "SELECT id_estudiante FROM students WHERE fk_id_usuario = %s",
+                    (current_user[0],)
+                )
+                student = cursor.fetchone()
+                if not student:
+                    raise HTTPException(status_code=404, detail="El usuario autenticado no es un estudiante")
+                
+                student_id = student[0]
+                cursor.execute(
+                    """
+                    INSERT INTO appointments (student_id, appointment_date, reason, status)
+                    VALUES (%s, %s, %s, 'pendiente')
+                    RETURNING id, student_id, appointment_date, status, reason, created_at
+                    """,
+                    (student_id, data.appointment_date, data.reason)
+                )
+                row = cursor.fetchone()
+                self.db.conn.commit()
+                
+                return {
+                    "id": row[0],
+                    "student_id": row[1],
+                    "appointment_date": self.format_date(row[2]),
+                    "status": row[3],
+                    "reason": row[4],
+                    "created_at": self.format_date(row[5])
+                }
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error creando cita: {str(e)}")
+
+    def get_my_appointments(self, current_user):
+        try:
+            with self.db.conn.cursor() as cursor:
+                self.ensure_appointments_table(cursor)
+                cursor.execute(
+                    "SELECT id_estudiante FROM students WHERE fk_id_usuario = %s",
+                    (current_user[0],)
+                )
+                student = cursor.fetchone()
+                if not student:
+                    raise HTTPException(status_code=404, detail="El usuario autenticado no es un estudiante")
+                
+                student_id = student[0]
+                cursor.execute(
+                    """
+                    SELECT id, appointment_date, status, reason, created_at, psychologist_id
+                    FROM appointments
+                    WHERE student_id = %s
+                    ORDER BY appointment_date DESC
+                    """,
+                    (student_id,)
+                )
+                rows = cursor.fetchall()
+                
+                return [{
+                    "id": row[0],
+                    "appointment_date": self.format_date(row[1]),
+                    "status": row[2],
+                    "reason": row[3],
+                    "created_at": self.format_date(row[4]),
+                    "psychologist_id": row[5]
+                } for row in rows]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo citas: {str(e)}")
+
+    def get_all_appointments(self):
+        try:
+            with self.db.conn.cursor() as cursor:
+                self.ensure_appointments_table(cursor)
+                cursor.execute(
+                    """
+                    SELECT a.id, a.appointment_date, a.status, a.reason, a.created_at, 
+                           u.name, u.last_name, s.codigo_institucional
+                    FROM appointments a
+                    JOIN students s ON s.id_estudiante = a.student_id
+                    JOIN users u ON u.id_usuario = s.fk_id_usuario
+                    ORDER BY a.appointment_date DESC
+                    """
+                )
+                rows = cursor.fetchall()
+                
+                return [{
+                    "id": row[0],
+                    "appointment_date": self.format_date(row[1]),
+                    "status": row[2],
+                    "reason": row[3],
+                    "created_at": self.format_date(row[4]),
+                    "student_name": f"{row[5]} {row[6]}",
+                    "student_code": row[7]
+                } for row in rows]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error obteniendo todas las citas: {str(e)}")
