@@ -4,7 +4,8 @@ from services.model.main import modelServices
 from schemas.auth.main import (
     RegisterStudent, StudentLogin, RoleCreate,
     FacultyCreate, ProgramCreate, RegisterUser,
-    VerifyEmailCode, ResendVerificationCode, UpdateUser, ChangePassword
+    VerifyEmailCode, ResendVerificationCode, UpdateUser, ChangePassword,
+    PasswordResetRequest, PasswordResetConfirm
 )
 from schemas.phq9 import PHQ9Request
 from schemas.gad7 import GAD7Request
@@ -40,13 +41,21 @@ def verify_email(data: VerifyEmailCode):
 def resend_code(data: ResendVerificationCode):
     return authServices().resend_verification_code(data)
 
+@app.post("/forgot-password", tags=["Auth"])
+def forgot_password(data: PasswordResetRequest):
+    return authServices().request_password_reset(data)
+
+@app.post("/reset-password", tags=["Auth"])
+def reset_password(data: PasswordResetConfirm):
+    return authServices().reset_password(data)
+
 @app.post("/login", tags=["Auth"])
 def login_user(data: StudentLogin):
     return authServices().login_user(data)
 
 @app.post("/change-password", tags=["Auth"])
-def change_password(data: ChangePassword):
-    return authServices().change_password(data)
+def change_password(data: ChangePassword, current_user=Depends(authServices().get_current_user)):
+    return authServices().change_password(data, current_user)
 
 @app.get("/users", tags=["Users"])
 def get_all_users():

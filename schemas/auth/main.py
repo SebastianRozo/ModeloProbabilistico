@@ -38,6 +38,16 @@ class ResendVerificationCode(BaseModel):
     email: str = Field(min_length=5, max_length=255)
 
 
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+
+
+class PasswordResetConfirm(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    reset_code: str = Field(min_length=4, max_length=12)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class UpdateUser(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
     last_name: str | None = Field(default=None, min_length=2, max_length=100)

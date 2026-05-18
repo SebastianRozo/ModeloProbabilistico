@@ -2,12 +2,12 @@ import os
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from db.connection.main import Connection
-from schemas.auth.main import RegisterStudent,RoleCreate,StudentLogin,FacultyCreate,ProgramCreate,RegisterUser,VerifyEmailCode,ResendVerificationCode,UpdateUser,ChangePassword
+from schemas.auth.main import RegisterStudent,RoleCreate,StudentLogin,FacultyCreate,ProgramCreate,RegisterUser,VerifyEmailCode,ResendVerificationCode,UpdateUser,ChangePassword,PasswordResetRequest,PasswordResetConfirm
 from fastapi import HTTPException
 from fastapi import Depends
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from psycopg.errors import UniqueViolation
-from services.auth.mail.main import send_verification_code
+from services.auth.mail.main import send_verification_code, send_password_reset_code
 import jwt
 
 # JWT configuration
@@ -47,6 +47,44 @@ class authServices:
             VALUES (%s, %s, %s)
             """,
             (user_id, verification_code_hash, expires_at),
+        )
+
+    def _ensure_password_reset_table(self, cursor):
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS password_reset_codes (
+                id_codigo_recuperacion SERIAL PRIMARY KEY,
+                fk_id_usuario INTEGER NOT NULL REFERENCES users(id_usuario) ON DELETE CASCADE,
+                codigo_hash TEXT NOT NULL,
+                expira_en TIMESTAMPTZ NOT NULL,
+                usado_en TIMESTAMPTZ NULL,
+                fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_password_reset_codes_usuario
+            ON password_reset_codes (fk_id_usuario)
+            """
+        )
+
+    def _create_password_reset_code(self, cursor, user_id: int, email: str):
+        self._ensure_password_reset_table(cursor)
+        now = datetime.now(timezone.utc)
+        cursor.execute(
+            "UPDATE password_reset_codes SET usado_en = %s WHERE fk_id_usuario = %s AND usado_en IS NULL",
+            (now, user_id),
+        )
+        reset_code = send_password_reset_code(email)
+        reset_code_hash = self.hash_password(reset_code).decode("utf-8")
+        expires_at = now + timedelta(minutes=10)
+        cursor.execute(
+            """
+            INSERT INTO password_reset_codes (fk_id_usuario, codigo_hash, expira_en)
+            VALUES (%s, %s, %s)
+            """,
+            (user_id, reset_code_hash, expires_at),
         )
 
     def create_role(self, data: RoleCreate):
@@ -442,6 +480,80 @@ class authServices:
         except Exception as e:
             self.db.conn.rollback()
             raise HTTPException(status_code=500, detail=f"Error reenviando codigo: {str(e)}")
+
+    def request_password_reset(self, data:PasswordResetRequest):
+        try:
+            with self.db.conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id_usuario FROM users WHERE email = %s",
+                    (data.email,),
+                )
+                user = cursor.fetchone()
+                if user:
+                    self._create_password_reset_code(cursor, user[0], data.email)
+                    self.db.conn.commit()
+
+            return {
+                "message": "Si el correo esta registrado, se enviara un codigo de recuperacion",
+                "email": data.email,
+            }
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error solicitando recuperacion de contraseña: {str(e)}")
+
+    def reset_password(self, data:PasswordResetConfirm):
+        try:
+            with self.db.conn.cursor() as cursor:
+                self._ensure_password_reset_table(cursor)
+                cursor.execute(
+                    "SELECT id_usuario, password FROM users WHERE email = %s",
+                    (data.email,),
+                )
+                user = cursor.fetchone()
+                if not user:
+                    raise HTTPException(status_code=400, detail="Codigo de recuperacion invalido o expirado")
+
+                cursor.execute(
+                    """
+                    SELECT id_codigo_recuperacion, codigo_hash, expira_en
+                    FROM password_reset_codes
+                    WHERE fk_id_usuario = %s AND usado_en IS NULL
+                    ORDER BY fecha_creacion DESC
+                    LIMIT 1
+                    """,
+                    (user[0],),
+                )
+                reset_code = cursor.fetchone()
+                if not reset_code:
+                    raise HTTPException(status_code=400, detail="Codigo de recuperacion invalido o expirado")
+                if reset_code[2] < datetime.now(timezone.utc):
+                    raise HTTPException(status_code=400, detail="Codigo de recuperacion invalido o expirado")
+                if not self.verify_password(data.reset_code, reset_code[1].encode("utf-8")):
+                    raise HTTPException(status_code=400, detail="Codigo de recuperacion invalido o expirado")
+                if self.verify_password(data.new_password, user[1].encode("utf-8")):
+                    raise HTTPException(status_code=400, detail="La nueva contraseña debe ser diferente a la actual")
+
+                new_password_hash = self.hash_password(data.new_password).decode("utf-8")
+                now = datetime.now(timezone.utc)
+                cursor.execute(
+                    "UPDATE users SET password = %s WHERE id_usuario = %s",
+                    (new_password_hash, user[0]),
+                )
+                cursor.execute(
+                    "UPDATE password_reset_codes SET usado_en = %s WHERE fk_id_usuario = %s AND usado_en IS NULL",
+                    (now, user[0]),
+                )
+                self.db.conn.commit()
+            return {"message":"Contraseña restablecida exitosamente"}
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error restableciendo contraseña: {str(e)}")
 
     def get_total_pages(self, total:int, limit:int):
         if total == 0:
