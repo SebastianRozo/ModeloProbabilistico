@@ -453,6 +453,7 @@ class modelServices:
             offset = (page - 1) * limit
             with self.db.conn.cursor() as cursor:
                 self.ensure_phq9_created_at_column(cursor)
+                self.ensure_gad7_table(cursor)
 
                 cursor.execute(
                     "SELECT id_estudiante FROM students WHERE id_estudiante = %s",
@@ -463,6 +464,7 @@ class modelServices:
                     raise HTTPException(status_code=404, detail="Estudiante no encontrado")
 
                 score_expr = self.get_phq9_score_expression(cursor)
+                gad7_score_expr = "COALESCE(total_score, (q1 + q2 + q3 + q4 + q5 + q6 + q7))"
 
                 date_column = None
                 for column_name in ("created_at", "fecha_creacion"):
@@ -470,7 +472,7 @@ class modelServices:
                         date_column = column_name
                         break
 
-                date_expr = date_column if date_column else "NULL"
+                date_expr = date_column if date_column else "NULL::timestamptz"
                 order_expr = f"{date_column} DESC NULLS LAST, id DESC" if date_column else "id DESC"
                 cursor.execute(
                     f"""
@@ -485,20 +487,43 @@ class modelServices:
                 latest_row = cursor.fetchone()
 
                 cursor.execute(
-                    "SELECT COUNT(*) FROM phq9_responses WHERE student_id = %s",
+                    f"""
+                    SELECT id, {gad7_score_expr} AS score, created_at AS evaluation_date
+                    FROM gad7_responses
+                    WHERE student_id = %s
+                    ORDER BY created_at DESC NULLS LAST, id DESC
+                    LIMIT 1
+                    """,
                     (id_estudiante,),
+                )
+                latest_gad7_row = cursor.fetchone()
+
+                cursor.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM phq9_responses WHERE student_id = %s) +
+                        (SELECT COUNT(*) FROM gad7_responses WHERE student_id = %s)
+                    """,
+                    (id_estudiante, id_estudiante),
                 )
                 total_history = cursor.fetchone()[0]
 
                 cursor.execute(
                     f"""
-                    SELECT id, {score_expr} AS score, {date_expr} AS evaluation_date
-                    FROM phq9_responses
-                    WHERE student_id = %s
-                    ORDER BY {order_expr}
+                    SELECT test_name, id, score, evaluation_date
+                    FROM (
+                        SELECT 'PHQ-9' AS test_name, id, {score_expr} AS score, {date_expr} AS evaluation_date
+                        FROM phq9_responses
+                        WHERE student_id = %s
+                        UNION ALL
+                        SELECT 'GAD-7' AS test_name, id, {gad7_score_expr} AS score, created_at AS evaluation_date
+                        FROM gad7_responses
+                        WHERE student_id = %s
+                    ) evaluations
+                    ORDER BY evaluation_date DESC NULLS LAST, id DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (id_estudiante, limit, offset),
+                    (id_estudiante, id_estudiante, limit, offset),
                 )
                 rows = cursor.fetchall()
 
@@ -512,20 +537,33 @@ class modelServices:
                     "risk": self.get_phq9_risk(latest_score),
                 }
 
+            latest_gad7 = None
+            if latest_gad7_row:
+                latest_gad7_score = int(latest_gad7_row[1])
+                latest_gad7 = {
+                    "date": self.format_date(latest_gad7_row[2]),
+                    "test_name": "GAD-7",
+                    "score": latest_gad7_score,
+                    "risk": self.get_gad7_risk(latest_gad7_score),
+                }
+
             history = []
             for row in rows:
-                score = int(row[1])
+                test_name = row[0]
+                score = int(row[2])
                 history.append({
-                    "date": self.format_date(row[2]),
-                    "test_name": "PHQ-9",
+                    "date": self.format_date(row[3]),
+                    "test_name": test_name,
                     "score": score,
-                    "risk": self.get_phq9_risk(score),
+                    "risk": self.get_gad7_risk(score) if test_name == "GAD-7" else self.get_phq9_risk(score),
                 })
 
             return {
                 "student_id": id_estudiante,
                 "latest_phq9": latest_phq9,
+                "latest_gad7": latest_gad7,
                 "current_risk": latest_phq9["risk"] if latest_phq9 else None,
+                "current_anxiety_risk": latest_gad7["risk"] if latest_gad7 else None,
                 "history": history,
                 "pagination": {
                     "page": page,
@@ -611,6 +649,7 @@ class modelServices:
                 "probabilidad": probabilidad,
                 "clase": clase,
                 "total_score": total_score,
+                "riesgo": self.get_phq9_risk(total_score),
             }
         except HTTPException:
             raise
