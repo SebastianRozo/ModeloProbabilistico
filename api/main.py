@@ -144,3 +144,11 @@ def get_my_appointments(current_user=Depends(authServices().get_current_user)):
 def get_all_appointments(current_user=Depends(authServices().get_current_user)):
     # In a real app, check for admin/psychologist role here
     return modelServices().get_all_appointments()
+
+@app.put("/appointments/{appointment_id}", tags=["Appointments"])
+def update_appointment(appointment_id: int, data: AppointmentUpdate, current_user=Depends(authServices().get_current_user)):
+    return modelServices().update_appointment(appointment_id, data, current_user)
+
+@app.delete("/appointments/{appointment_id}", tags=["Appointments"])
+def delete_appointment(appointment_id: int, current_user=Depends(authServices().get_current_user)):
+    return modelServices().delete_appointment(appointment_id, current_user)

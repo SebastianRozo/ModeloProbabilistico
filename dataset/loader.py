@@ -39,12 +39,12 @@ def getDataset():
 def getDataSetGAD7():
     #carga de dataset
     csv_path = Path(__file__).resolve().parent.parent / "data" / "gad7.csv"
-    df_gad = pl.read_csv(csv_path, encoding="iso-8859-1")   
+    gad_cols = ["GAD1", "GAD2", "GAD3", "GAD4", "GAD5", "GAD6", "GAD7"]
+    df_gad = pl.read_csv(csv_path, columns=gad_cols, encoding="utf8-lossy")   
 
     #Mezcla de datos
     df_mezclado = df_gad.sample(fraction=1.0, shuffle=True, seed=42)
     #Separacion de columnas (X: PUNTOS DEL FORMULARIO , Y :SCORE TOTAL ) si quiero agregar mas columnas solo las agrego a la seleccion de x 
-    gad_cols = ["GAD1", "GAD2", "GAD3", "GAD4", "GAD5", "GAD6", "GAD7"]
     X=df_mezclado.select(gad_cols)
     Y=df_mezclado.select(
         pl.when(pl.sum_horizontal(gad_cols) >= 5).then(1).otherwise(0).alias("score")

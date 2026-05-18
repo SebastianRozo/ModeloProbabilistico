@@ -826,3 +826,116 @@ class modelServices:
                 } for row in rows]
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error obteniendo todas las citas: {str(e)}")
+
+    def can_manage_appointment(self, cursor, current_user, student_id):
+        cursor.execute(
+            "SELECT id_estudiante FROM students WHERE fk_id_usuario = %s",
+            (current_user[0],)
+        )
+        student = cursor.fetchone()
+        if student and student[0] == student_id:
+            return True
+
+        cursor.execute(
+            """
+            SELECT roles.nombre_rol
+            FROM users
+            JOIN roles ON roles.id_rol = users.fk_id_rol
+            WHERE users.id_usuario = %s
+            """,
+            (current_user[0],)
+        )
+        role = cursor.fetchone()
+        if not role:
+            return False
+
+        return role[0].lower() in ("admin", "administrador", "psicologo", "psicologa")
+
+    def update_appointment(self, appointment_id: int, data: AppointmentUpdate, current_user):
+        try:
+            update_data = data.model_dump(exclude_none=True)
+            if not update_data:
+                raise HTTPException(status_code=400, detail="No se enviaron datos para actualizar")
+
+            with self.db.conn.cursor() as cursor:
+                self.ensure_appointments_table(cursor)
+                cursor.execute(
+                    "SELECT student_id FROM appointments WHERE id = %s",
+                    (appointment_id,)
+                )
+                appointment = cursor.fetchone()
+                if not appointment:
+                    raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+                if not self.can_manage_appointment(cursor, current_user, appointment[0]):
+                    raise HTTPException(status_code=403, detail="No tienes permiso para modificar esta cita")
+
+                field_map = {
+                    "appointment_date": "appointment_date",
+                    "status": "status",
+                    "reason": "reason",
+                }
+                assignments = []
+                values = []
+                for field, value in update_data.items():
+                    assignments.append(f"{field_map[field]} = %s")
+                    values.append(value)
+
+                values.append(appointment_id)
+                cursor.execute(
+                    f"""
+                    UPDATE appointments
+                    SET {', '.join(assignments)}
+                    WHERE id = %s
+                    RETURNING id, student_id, appointment_date, status, reason, created_at, psychologist_id
+                    """,
+                    tuple(values)
+                )
+                row = cursor.fetchone()
+                self.db.conn.commit()
+
+                return {
+                    "id": row[0],
+                    "student_id": row[1],
+                    "appointment_date": self.format_date(row[2]),
+                    "status": row[3],
+                    "reason": row[4],
+                    "created_at": self.format_date(row[5]),
+                    "psychologist_id": row[6]
+                }
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error actualizando cita: {str(e)}")
+
+    def delete_appointment(self, appointment_id: int, current_user):
+        try:
+            with self.db.conn.cursor() as cursor:
+                self.ensure_appointments_table(cursor)
+                cursor.execute(
+                    "SELECT student_id FROM appointments WHERE id = %s",
+                    (appointment_id,)
+                )
+                appointment = cursor.fetchone()
+                if not appointment:
+                    raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+                if not self.can_manage_appointment(cursor, current_user, appointment[0]):
+                    raise HTTPException(status_code=403, detail="No tienes permiso para eliminar esta cita")
+
+                cursor.execute(
+                    "DELETE FROM appointments WHERE id = %s RETURNING id",
+                    (appointment_id,)
+                )
+                cursor.fetchone()
+                self.db.conn.commit()
+
+                return {"message": "Cita eliminada exitosamente"}
+        except HTTPException:
+            self.db.conn.rollback()
+            raise
+        except Exception as e:
+            self.db.conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error eliminando cita: {str(e)}")
