@@ -125,11 +125,11 @@ def create_program(data: ProgramCreate, current_user=Depends(authServices().get_
     return authServices().create_program(data)
 
 @app.get("/faculties", tags=["Faculties"])
-def get_all_faculties(current_user=Depends(authServices().get_current_user)):
+def get_all_faculties():
     return authServices().get_all_faculties()
 
 @app.get("/programs", tags=["Programs"])
-def get_all_programs(current_user=Depends(authServices().get_current_user)):
+def get_all_programs():
     return authServices().get_all_programs()
 
 
